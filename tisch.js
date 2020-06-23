@@ -1,4 +1,16 @@
-define(['vm', 'util'], function (vm, util) {
+// If `define` is defined, use that. Otherwise, assume we're in node and use
+// `require` and `module.exports`.
+(function () {
+    if (typeof define === 'undefined') {
+        // use node-style modules
+        return function (deps, init) {
+            module.exports = init(...deps.map(require));
+        };
+    } else {
+        // use AMD-style modules
+        return define;
+    }
+}())(['vm', 'util'], function (vm, util) {
 const etcSymbol = Symbol('tisch.etc'),
       orSymbol = Symbol('tisch.or'),
       str = (...args) => util.inspect(...args);
