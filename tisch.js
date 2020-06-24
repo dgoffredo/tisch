@@ -293,8 +293,9 @@ function compile(schemaString) {
     // some special identifiers defined here.
     const context = {etc, or, Any};
     vm.createContext(context);
-    // Wrap it in parenthese so that {...} is an object, not a scope.
-    const schema = vm.runInContext(`(${schemaString})`, context);
+    // Wrap it in parenthese so that {...} is an object, not a scope. Use
+    // newlines so comments don't screw it up.
+    const schema = vm.runInContext('(\n' + schemaString + '\n)', context);
     return validator(schema);
 }
 
