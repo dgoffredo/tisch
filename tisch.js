@@ -287,15 +287,29 @@ function objectValidator(schema, errors) {
     };
 }
 
+// Return a list of path strings matching the specified shell glob `pattern`.
+// Note that this implementation of `glob` allows for arbitrary code execution
+// with the privileges of the current process. Its intended to be used with a
+// hard-coded pattern.
+function glob(pattern) {
+    const command = 'ls --directory -1 ' + pattern,
+          options = {encoding: 'utf8'},
+          output = child_process.execSync(command, options),
+          lines = output.split('\n');
+
+    // The `ls` output will end with a newline, so `lines` has an extra empty.
+    lines.pop();
+    return lines;
+}
+
 function compile(schemaString) {
     // Create a Javascript evaluation context that contains only core
     // Javascript (e.g. `JSON`, `Object`, `Number`, etc.) and additionally
     // some special identifiers defined here.
     const context = {etc, or, Any};
     vm.createContext(context);
-    // Wrap it in parenthese so that {...} is an object, not a scope. Use
-    // newlines so comments don't screw it up.
-    const schema = vm.runInContext('(\n' + schemaString + '\n)', context);
+
+    const schema = vm.runInContext(schemaString, context);
     return validator(schema);
 }
 
