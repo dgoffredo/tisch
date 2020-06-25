@@ -142,5 +142,12 @@ it is invoked as a function with two non-negative integers arguments
 `or` is a special function in tisch schemas. It matches any value that matches
 at least one of its arguments.
 
+### `define([dependencyPath, ...], function (dependency, ...) { ... })`
+`define` is a special function in tisch schemas. It loads tisch schemas from
+the files at the specified paths (`[dependencyPath, ...]`) and then invokes
+the specified `function` with the loaded schemas as arguments (corresponding
+to the paths). The function must return a schema (pattern). In this way,
+schemas in separate files can refer to each other by name.
+
 [1]: https://json-schema.org
 [2]: https://github.com/amdjs/amdjs-api/blob/master/AMD.md

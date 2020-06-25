@@ -10,7 +10,9 @@
         // use AMD-style modules
         return define;
     }
-}())(['vm', 'util'], function (vm, util) {
+}())(['vm', 'util', 'path', 'child_process'], function (vm, util, path, child_process) {
+'use strict';
+
 const etcSymbol = Symbol('tisch.etc'),
       orSymbol = Symbol('tisch.or'),
       str = (...args) => util.inspect(...args);
@@ -45,19 +47,31 @@ function isObject(value) {
     return Object.prototype.toString.call(value) === '[object Object]';
 }
 
-function validator(schema) {
-    // This function is a little tricky. We want `errors` to be local to this
-    // function, but also accessible as an output parameter to the function
-    // returned by `validatorImpl`, and finally a property accessible on the
-    // function object returned by this function.
+// A validator is just a function that returns true or false, and as a side
+// effect might append to a bound array of error diagnostics.
+// When a user invokes a validator, we want the array of errors to get
+// cleared first. The problem is that validators can call each other -- we
+// wouldn't want one validator clearing the error array used by the other
+// validators. So, no validators do any clearing, and then the final "root"
+// validator is wrapped with a function that does the clearing, and this is
+// the function that the user sees.
+function wrappedValidator(impl, errors) {
     // `errors` gets cleared (but never reassigned) each time the returned
     // function is invoked. The returned function returns a boolean, but if it
     // returns `false`, the caller can find out why by inspecting `.errors`.
-    const errors = [],
-          impl = validatorImpl(schema, errors),
-          validate = function (value) {
+    const validate = function (value) {
               errors.length = 0;
-              return impl(value);
+              const matched = impl(value);
+
+              // If we _did_ match, then there might still be strings in
+              // `errors`, e.g. if we matched the `c` in `or(a, b, c)`, then
+              // `errors` will contain the diagnostics from failing to match
+              // `a` and `b`. In this case, clear `errors`.
+              if (matched) {
+                  errors.length = 0;
+              }
+
+              return matched;
           };
 
     validate.errors = errors;
@@ -72,6 +86,14 @@ function validatorImpl(schema, errors) {
         ['Number', 'Boolean', 'Object', 'Array', 'String'].includes(schema.name)) {
         return typeValidator(schema, errors);
     }
+    // When multiple inter-dependent schemas are loaded together, two schemas
+    // might both contain a third, and so one of them will compile the third
+    // first. That means that the other will see the _compiled_ version, so we
+    // need to be able to detect when our input is already compiled. What that
+    // looks like is a function that isn't one of the above (Boolean, etc.).
+    if (typeof schema === 'function') {
+        return schema;
+    }
     if (['string', 'number', 'boolean'].includes(typeof schema) || schema === null) {
         return literalValidator(schema, errors);
     }
@@ -80,7 +102,6 @@ function validatorImpl(schema, errors) {
     }
     
     if (!isObject(schema)) {
-        // TODO: better diagnostic
         throw Error(`Invalid schema subpattern: ${str(schema)}`);
     }
     // We're dealing with an object. It might be an object pattern, but it
@@ -125,11 +146,11 @@ function isEtc(pattern) {
     return pattern !== null && pattern[etcSymbol];
 }
 
-function isArray(value, errors) {
+function checkIsArray(value, errors) {
     if (Array.isArray(value)) {
         return true;
     }
-    errors.push(`expected an array for pattern ${str(elements)} but received a ${typeof value}: ${str(value)}`);
+    errors.push(`expected an array but received a ${typeof value}: ${str(value)}`);
     return false;
 }
 
@@ -156,23 +177,22 @@ function arrayValidator(elements, errors) {
 
 function fixedArrayValidator(patterns, errors) {
     if (patterns.some(isEtc)) {
-            // TODO: better error handling
             throw Error(`"...etc" cannot appear in an array except at the end.`);
     }
 
     const validators = patterns.map(pattern => validatorImpl(pattern, errors));
 
     return function (value) {
-        if (!isArray(value, errors)) {
-            errors.push(`occurred in array pattern ${str(patterns)}`);
+        if (!checkIsArray(value, errors)) {
+            errors.push(`...occurred in array pattern ${str(patterns)}`);
             return false;
         }
         if (value.length !== patterns.length) {
             errors.push(`wrong number of array elements. Expected ${patterns.length} in ${str(patterns)} but got ${value.length}: ${str(value)}`);
             return false;
         }
-        if (!validators.every((validator, i) => validator(value[i]))) {
-            errors.push(`occurred in array pattern ${str(patterns)}`);
+        if (!validators.every((validate, i) => validate(value[i]))) {
+            errors.push(`...occurred in array pattern ${str(patterns)}`);
             return false;
         }
         return true;
@@ -184,6 +204,11 @@ function dynamicArrayValidator(fixed, repeatable, {min=0, max=Infinity}, errors)
           repeatableValidator = validatorImpl(repeatable, errors);
 
     return function (value) {
+        if (!checkIsArray(value, errors)) {
+            errors.push(`...occurred in array pattern ${str([...fixed, repeatable, etc])}`);
+            return false;
+        }
+
         const fixedPart = value.slice(0, fixed.length);
         if (!fixedValidator(fixedPart)) {
             return false;
@@ -196,8 +221,12 @@ function dynamicArrayValidator(fixed, repeatable, {min=0, max=Infinity}, errors)
             errors.push(`...etc(${min}, ${max}) at end of array pattern, but candidate array has ${len} trailing elements: ${str(repeatablePart)}`);
             return false;
         }
-        // TODO: maybe add context to `errors` when the following fails.
-        return repeatablePart.every(repeatableValidator);
+
+        const matched = repeatablePart.every(repeatableValidator);
+        if (!matched) {
+            errors.push(`Not every trailing element matched the pattern ${str(repeatable)}: ${str(repeatablePart)}`);
+        }
+        return matched;
     };
 }
 
@@ -207,8 +236,11 @@ function orValidator(patterns, errors) {
         return () => true;
     }
     return function (value) {
-        // TODO: add context when the following fails.
-        return validators.some(validate => validate(value));
+        const matched = validators.some(validate => validate(value));
+        if (!matched) {
+            errors.push(`The value ${str(value)} did not match any of the "or" patterns: ${str(patterns)}`);
+        }
+        return matched;
     };
 }
 
@@ -219,7 +251,7 @@ function objectValidator(schema, errors) {
 
     // `min` and `max` as in "minimum and maximum number of allowed keys aside
     // from those that are required or optional."
-    const {min=0, max=Infinity} = schema[etcSymbol] || {min: 0, max: 0};
+    const {min=0, max=Infinity} = schema[etcSymbol] || {min: 0, max: 0},
           required = {}, // {key: validator}
           optional = {}; // {key: validator}
     
@@ -243,10 +275,11 @@ function objectValidator(schema, errors) {
         let ok = Object.entries(required).every(([key, validate]) => {
             if (!(key in object)) {
                 errors.push(`Missing required field ${JSON.stringify(key)} for pattern ${str(schema)}: ${str(object)}`);
+                errors.push(`The following fields are required: ${str(Object.keys(required))}`);
                 return false;
             }
             if (!validate(object[key])) {
-                errors.push(`occurred at required field ${JSON.stringify(key)} in ${str(schema)}`);
+                errors.push(`...occurred at required field ${JSON.stringify(key)} in ${str(schema)}`);
                 return false;
             }
             return true;
@@ -261,7 +294,7 @@ function objectValidator(schema, errors) {
         ok = Object.entries(object).every(([key, value]) => {
             if (key in optional) {
                 if (!optional[key](value)) {
-                    errors.push(`occurred at optional field ${JSON.stringify(key)} in ${str(schema)}`);
+                    errors.push(`...occurred at optional field ${JSON.stringify(key)} in ${str(schema)}`);
                     return false;
                 }
             }
@@ -287,17 +320,153 @@ function objectValidator(schema, errors) {
     };
 }
 
-function compile(schemaString) {
+// Return an array of path strings matching the specified shell glob
+// `patterns`. Note that this implementation of `glob` allows for arbitrary
+// code execution with the privileges of the current process. It's intended to
+// be used with hard-coded patterns.
+function glob(...patterns) {
+    // The `-1` means "one column," which puts each path on its own line.
+    const command = ['ls', '--directory', '-1', ...patterns].join(' '),
+          options = {encoding: 'utf8'},
+          output = child_process.execSync(command, options),
+          lines = output.split('\n');
+
+    // The `ls` output will end with a newline, so `lines` has an extra empty.
+    lines.pop();
+    return lines;
+}
+
+// Return a validator compiled from the file at the specified `schemaPath`.
+// The specified array for `errors` will be bound inside the validator. Since
+// validators can depend on each other, use the specified registry of
+// `validators` (`{<path>: <validator>}`) to look up or populate dependent
+// validators. The returned validator will also be added to `validators`. Note
+// that the returned validator function does not clear `errors`. For that it
+// must be wrapped (see `wrappedValidator`).
+function compileFile(schemaPath, validators, errors) {
+    // We're traversing a directed graph.
+    if (schemaPath in validators) {
+        return validators[schemaPath];
+    }
+
+    const schemaString = fs.readFileSync(schemaPath, {encoding: 'utf8'}),
+          schemaDir = path.dirname(schemaPath),
+          validator = compileImpl(schemaString, schemaDir, validators, errors);
+
+    return validators[schemaPath] = validator;
+}
+
+// Return a validator function compiled from the specified `schemaString`,
+// using the specified `schemaDir` as the effective working directory (for
+// finding dependent schema files). The specified array of `errors` will be
+// bound inside of the validator. Since validators can depend on each other,
+// use the specified `validators` (`{<path>: <validator>}`) to look up or
+// populate dependent validators. Note that the returned validator function
+// does not clear `errors`. For that it must be wrapped (see
+// `wrappedValidator`).
+function compileImpl(schemaString, schemaDir, validators, errors) {
+    // Here we define a function that is the `define` equivalent for tisch
+    // schemas. It allows a schema to say, "I depend on these other schemas,
+    // and please bind them to the arguments of this function, which will
+    // return my schema."
+    // For example, a schema describing a boy scout might depend on a schema
+    // that describes boy scout badges and another that describes camping
+    // locations. Then `boyscout.tisch.js` could look like this:
+    //
+    //     define(['./badge.tisch.js', './campsite.tisch.js'],
+    //         (badge, campsite)  => ({
+    //             'name': String,
+    //             'birth_year': Number,
+    //             'trips': [{
+    //                 'site': campsite,
+    //                 'year': Number,
+    //                 'badges_received': [badge, ...etc]
+    //             }, ...etc]
+    //         }));
+    //
+    // An example boy scout might be:
+    //
+    //     {
+    //         name: "Muhammad Al-Shamali",
+    //         birth_year: 1987,
+    //         trips: [{site: 'TURKEY_LAKE', year: 2000, badges_received: []},
+    //                    {site: 'TURKEY_LAKE', year: 2001,
+    //                     badges_received: ['WOODWORKING']}]
+    //     }
+    //     
+    // Dependencies are paths to tisch schema files, relative to the directory
+    // of the current file (i.e. the file with the `define` call).
+
+    function defineSchema(deps, init) {
+        // `deps` are relative to `schemaDir`. Make them relative to `./`.
+        const dep_schemas = deps.map(depPath => {
+            const rebasedDepPath =
+                path.normalize(path.join(schemaDir, depPath));
+
+            return compileFile(rebasedDepPath, validators, errors);
+        });
+
+        return init(...dep_schemas);
+    }
+
+    return compileStringImpl(schemaString, defineSchema, errors);
+}
+
+// Return an object `{<path>: <validator>}` of validator functions compiled
+// from files whose paths match any of the specified `glob_patterns`. The
+// globbing is done relative to the current working directory. The returned
+// validator functions clear their `.error` array when called (so errors from
+// previous invocations are not preserved).
+function compileFiles(...glob_patterns) {
+    const paths = glob(...glob_patterns),
+          validators = {},
+          errors = [];
+
+    paths.forEach(schemaPath => compileFile(schemaPath, validators, errors));
+
+    // `validators` now maps schema file paths to validator functions. All of
+    // the validator functions have `errors` bound within them. Wrap each
+    // validator function in a function that first clears `errors`, and then
+    // calls the underlying validator.
+    Object.entries(validators).forEach(
+        ([key, validate]) =>
+            validators[key] = wrappedValidator(validate, errors));
+
+    return validators;
+}
+
+// This is the core compilation function: all of the other `compile*`
+// functions are wrappers that ultimately call `compileStringImpl`.
+//
+// Return a validator function compiled from the specified `schemaString`.
+// Bind the specified `schemaDefiner` function as "define" in the global
+// environment of the evaluated code -- the evaluated schema can use it to
+// depend upon schemas in other files. The specified array of `errors` will be
+// bound within the returned validator.
+function compileStringImpl(schemaString, schemaDefiner, errors) {
     // Create a Javascript evaluation context that contains only core
     // Javascript (e.g. `JSON`, `Object`, `Number`, etc.) and additionally
     // some special identifiers defined here.
-    const context = {etc, or, Any};
+    const context = {etc, or, Any, define: schemaDefiner};
     vm.createContext(context);
-    // Wrap it in parenthese so that {...} is an object, not a scope. Use
-    // newlines so comments don't screw it up.
-    const schema = vm.runInContext('(\n' + schemaString + '\n)', context);
-    return validator(schema);
+
+    const schema = vm.runInContext(schemaString, context);
+    return validatorImpl(schema, errors);
 }
 
-return {compile};
+// Return a validator function compiled from the specified `schemaString`. The
+// `.error` property of the returned validator function will be cleared at the
+// beginning of each invocation (so errors from previous invocations are not
+// preserved).
+function compileString(schemaString) {
+    const validators = {},
+          errors = [],
+    // You gave just a string (not a file), so dependency paths will be
+    // relative to the current working directory.
+          schemaDir = '.';
+    return wrappedValidator(
+        compileImpl(schemaString, schemaDir, validators, errors), errors);
+}
+
+return {compileString, compileFiles};
 });
