@@ -15,18 +15,21 @@ with.
 
 How
 ---
-[tisch.js](tisch.js) is an [asynchonous module][2] that exports one function,
-`compile`, that given a string of Javascript code representing a tisch schema
-will return a function that validates its argument against the schema. For
-example,
+[tisch.js](tisch.js) is an [asynchonous module][2] that exports functions for
+converting _tisch schemas_ into functions that validate an object against the
+schema.
+
+For example,
 ```javascript
 define(['tisch.js'], function (tisch) {
+    // Here's a string containing a tisch schema, which is just javascript
+    // code. This schema describes a JSON representation of a SQL table.
     const my_schema = `{
         name: String,
         columns: [{
             name: String,
-            is_nullable: Boolean,
-            is_primary_key: Boolean,
+            "is_nullable?": Boolean,
+            "is_primary_key?": Boolean,
             "foreign_key?": {
                 table: String,
                 column: String,
@@ -40,7 +43,7 @@ define(['tisch.js'], function (tisch) {
         }, ...etc(1)]
     }`;
 
-    const validate = tisch.compile(my_schema);
+    const validate = tisch.compileString(my_schema);
     const valid = validate({
         name: 'ethnicity',
         columns: [
