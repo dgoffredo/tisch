@@ -46,18 +46,12 @@ function isObject(value) {
     return Object.prototype.toString.call(value) === '[object Object]';
 }
 
-function validator(schema) {
-    // This function is a little tricky. We want `errors` to be local to this
-    // function, but also accessible as an output parameter to the function
-    // returned by `validatorImpl`, and finally a property accessible on the
-    // function object returned by this function.
+function wrappedValidator(impl, errors) {
     // `errors` gets cleared (but never reassigned) each time the returned
     // function is invoked. The returned function returns a boolean, but if it
     // returns `false`, the caller can find out why by inspecting `.errors`.
-    const errors = [],
-          impl = validatorImpl(schema, errors),
-          validate = function (value) {
-              errors.length = 0;
+    const validate = function (value) {
+              errors.length = 0; // TODO: this is not right if they're shared.
               return impl(value);
           };
 
@@ -69,9 +63,19 @@ function validator(schema) {
 }
 
 function validatorImpl(schema, errors) {
+    console.log('looking at', schema); // TODO
     if (typeof schema === 'function' &&
         ['Number', 'Boolean', 'Object', 'Array', 'String'].includes(schema.name)) {
         return typeValidator(schema, errors);
+    }
+    // When multiple inter-dependent schemas are loaded together, two schemas
+    // might both contain a third, and so one of them will compile the third
+    // first. That means that the other will see the _compiled_ version, so we
+    // need to be able to detect when our input is already compiled. What that
+    // looks like is a function that isn't one of the above (Boolean, etc.).
+    if (typeof schema === 'function') {
+        console.log('returning what I think is already a validator'); // TODO
+        return schema;
     }
     if (['string', 'number', 'boolean'].includes(typeof schema) || schema === null) {
         return literalValidator(schema, errors);
@@ -81,7 +85,7 @@ function validatorImpl(schema, errors) {
     }
     
     if (!isObject(schema)) {
-        // TODO: better diagnostic
+        // TODO: contextual diagnostic
         throw Error(`Invalid schema subpattern: ${str(schema)}`);
     }
     // We're dealing with an object. It might be an object pattern, but it
@@ -130,7 +134,7 @@ function isArray(value, errors) {
     if (Array.isArray(value)) {
         return true;
     }
-    errors.push(`expected an array for pattern ${str(elements)} but received a ${typeof value}: ${str(value)}`);
+    errors.push(`expected an array but received a ${typeof value}: ${str(value)}`);
     return false;
 }
 
@@ -157,7 +161,7 @@ function arrayValidator(elements, errors) {
 
 function fixedArrayValidator(patterns, errors) {
     if (patterns.some(isEtc)) {
-            // TODO: better error handling
+            // TODO: contextual diagnostic 
             throw Error(`"...etc" cannot appear in an array except at the end.`);
     }
 
@@ -165,15 +169,15 @@ function fixedArrayValidator(patterns, errors) {
 
     return function (value) {
         if (!isArray(value, errors)) {
-            errors.push(`occurred in array pattern ${str(patterns)}`);
+            errors.push(`...occurred in array pattern ${str(patterns)}`);
             return false;
         }
         if (value.length !== patterns.length) {
             errors.push(`wrong number of array elements. Expected ${patterns.length} in ${str(patterns)} but got ${value.length}: ${str(value)}`);
             return false;
         }
-        if (!validators.every((validator, i) => validator(value[i]))) {
-            errors.push(`occurred in array pattern ${str(patterns)}`);
+        if (!validators.every((validate, i) => validate(value[i]))) {
+            errors.push(`...occurred in array pattern ${str(patterns)}`);
             return false;
         }
         return true;
@@ -181,10 +185,19 @@ function fixedArrayValidator(patterns, errors) {
 }
 
 function dynamicArrayValidator(fixed, repeatable, {min=0, max=Infinity}, errors) {
+    // TODO: debugging
+    console.log('looking at dynamic array. fixed: ', str(fixed), ' repeatable: ', str(repeatable));
+
     const fixedValidator = fixedArrayValidator(fixed, errors),
           repeatableValidator = validatorImpl(repeatable, errors);
 
     return function (value) {
+        if (!isArray(value, errors)) {
+            // TODO: This printing is different (the 'etc' part).
+            errors.push(`...occurred in array pattern ${str([...fixed, repeatable, '...etc'])}`);
+            return false;
+        }
+
         const fixedPart = value.slice(0, fixed.length);
         if (!fixedValidator(fixedPart)) {
             return false;
@@ -220,7 +233,7 @@ function objectValidator(schema, errors) {
 
     // `min` and `max` as in "minimum and maximum number of allowed keys aside
     // from those that are required or optional."
-    const {min=0, max=Infinity} = schema[etcSymbol] || {min: 0, max: 0};
+    const {min=0, max=Infinity} = schema[etcSymbol] || {min: 0, max: 0},
           required = {}, // {key: validator}
           optional = {}; // {key: validator}
     
@@ -244,10 +257,12 @@ function objectValidator(schema, errors) {
         let ok = Object.entries(required).every(([key, validate]) => {
             if (!(key in object)) {
                 errors.push(`Missing required field ${JSON.stringify(key)} for pattern ${str(schema)}: ${str(object)}`);
+                // TODO: hack
+                errors.push(`The following fields are required: ${str(Object.keys(required))}`);
                 return false;
             }
             if (!validate(object[key])) {
-                errors.push(`occurred at required field ${JSON.stringify(key)} in ${str(schema)}`);
+                errors.push(`...occurred at required field ${JSON.stringify(key)} in ${str(schema)}`);
                 return false;
             }
             return true;
@@ -262,7 +277,7 @@ function objectValidator(schema, errors) {
         ok = Object.entries(object).every(([key, value]) => {
             if (key in optional) {
                 if (!optional[key](value)) {
-                    errors.push(`occurred at optional field ${JSON.stringify(key)} in ${str(schema)}`);
+                    errors.push(`...occurred at optional field ${JSON.stringify(key)} in ${str(schema)}`);
                     return false;
                 }
             }
@@ -305,7 +320,7 @@ function glob(...patterns) {
 }
 
 // TODO: document
-function compileFile(schemaPath, validators) {
+function compileFile(schemaPath, validators, errors) {
     // We're traversing a directed graph.
     if (schemaPath in validators) {
         return validators[schemaPath];
@@ -313,13 +328,13 @@ function compileFile(schemaPath, validators) {
 
     const schemaString = fs.readFileSync(schemaPath, {encoding: 'utf8'}),
           schemaDir = path.dirname(schemaPath),
-          validator = compileImpl(schemaString, schemaDir, validators);
+          validator = compileImpl(schemaString, schemaDir, validators, errors);
 
     return validators[schemaPath] = validator;
 }
 
 // TODO: document
-function compileImpl(schemaString, schemaDir, validators) {
+function compileImpl(schemaString, schemaDir, validators, errors) {
     // Here we define a function that is the `define` equivalent for tisch
     // schemas. It allows a schema to say, "I depend on these other schemas,
     // and please bind them to the arguments of this function, which will
@@ -348,26 +363,36 @@ function compileImpl(schemaString, schemaDir, validators) {
             const rebasedDepPath =
                 path.normalize(path.join(schemaDir, depPath));
 
-            return compileFile(rebasedDepPath, validators);
+            return compileFile(rebasedDepPath, validators, errors);
         });
+
+        // TODO: debugging
+        console.log('Here are dep_schemas: ', str(dep_schemas));
 
         return init(...dep_schemas);
     }
 
-    return compileStringImpl(schemaString, defineSchema);
+    return compileStringImpl(schemaString, defineSchema, errors);
 }
 
 // TODO: document
 function compileFiles(...glob_patterns) {
     const paths = glob(...glob_patterns),
-          validators = {};
+          validators = {},
+          errors = [];
 
-    paths.forEach(schemaPath => compileFile(schemaPath, validators));
+    paths.forEach(schemaPath => compileFile(schemaPath, validators, errors));
+
+    // TODO: explain
+    Object.entries(validators).forEach(
+        ([key, validate]) =>
+            validators[key] = wrappedValidator(validate, errors));
+
     return validators;
 }
 
 // TODO: document
-function compileStringImpl(schemaString, schemaDefiner) {
+function compileStringImpl(schemaString, schemaDefiner, errors) {
     // Create a Javascript evaluation context that contains only core
     // Javascript (e.g. `JSON`, `Object`, `Number`, etc.) and additionally
     // some special identifiers defined here.
@@ -375,16 +400,18 @@ function compileStringImpl(schemaString, schemaDefiner) {
     vm.createContext(context);
 
     const schema = vm.runInContext(schemaString, context);
-    return validator(schema);
+    return validatorImpl(schema, errors);
 }
 
 // TODO: document
 function compileString(schemaString) {
-    const validators = {},
+    const validators = {}
+          errors = [],
     // You gave just a string (not a file), so dependency paths will be
     // relative to the current working directory.
           schemaDir = '.';
-    return compileImpl(schemaString, schemaDir, validators);
+    return wrappedValidator(
+        compileImpl(schemaString, schemaDir, validators, errors), errors);
 }
 
 return {compileString, compileFiles};
