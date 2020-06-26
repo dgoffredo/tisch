@@ -10,7 +10,8 @@
         // use AMD-style modules
         return define;
     }
-}())(['vm', 'util'], function (vm, util) {
+}())(['vm', 'util', 'path', 'child_process'],
+       function (vm, util, path, child_process) {
 const etcSymbol = Symbol('tisch.etc'),
       orSymbol = Symbol('tisch.or'),
       str = (...args) => util.inspect(...args);
@@ -287,12 +288,13 @@ function objectValidator(schema, errors) {
     };
 }
 
-// Return a list of path strings matching the specified shell glob `pattern`.
-// Note that this implementation of `glob` allows for arbitrary code execution
-// with the privileges of the current process. Its intended to be used with a
-// hard-coded pattern.
-function glob(pattern) {
-    const command = 'ls --directory -1 ' + pattern,
+// Return an array of path strings matching the specified shell glob
+// `patterns`. Note that this implementation of `glob` allows for arbitrary
+// code execution with the privileges of the current process. It's intended to
+// be used with hard-coded patterns.
+function glob(...patterns) {
+    // The `-1` means "one column," which puts each path on its own line.
+    const command = ['ls', '--directory', '-1', ...patterns].join(' '),
           options = {encoding: 'utf8'},
           output = child_process.execSync(command, options),
           lines = output.split('\n');
@@ -302,16 +304,88 @@ function glob(pattern) {
     return lines;
 }
 
-function compile(schemaString) {
+// TODO: document
+function compileFile(schemaPath, validators) {
+    // We're traversing a directed graph.
+    if (schemaPath in validators) {
+        return validators[schemaPath];
+    }
+
+    const schemaString = fs.readFileSync(schemaPath, {encoding: 'utf8'}),
+          schemaDir = path.dirname(schemaPath),
+          validator = compileImpl(schemaString, schemaDir, validators);
+
+    return validators[schemaPath] = validator;
+}
+
+// TODO: document
+function compileImpl(schemaString, schemaDir, validators) {
+    // Here we define a function that is the `define` equivalent for tisch
+    // schemas. It allows a schema to say, "I depend on these other schemas,
+    // and please bind them to the arguments of this function, which will
+    // return my schema."
+    // For example, a schema describing a boy scout might depend on a schema
+    // that describes boy scout badges and another that describes camping
+    // locations. Then `boyscout.tisch.js` could look like this:
+    //
+    //     define(['./badge.tisch.js', './campsite.tisch.js'],
+    //         (badge, campsite)  => ({
+    //             'name': String,
+    //             'age': Number,
+    //             'trips': [{
+    //                 'site': campsite,
+    //                 'year': Number,
+    //                 'badges_received': [badge, ...etc]
+    //             }, ...etc]
+    //         }));
+    //     
+    // Dependencies are paths to tisch schema files, relative to the current
+    // file (i.e. the file with the `define` call).
+
+    function defineSchema(deps, init) {
+        // `deps` are relative to `schemaPath`. Make them relative to `./`.
+        const dep_schemas = deps.map(depPath => {
+            const rebasedDepPath =
+                path.normalize(path.join(schemaDir, depPath));
+
+            return compileFile(rebasedDepPath, validators);
+        });
+
+        return init(...dep_schemas);
+    }
+
+    return compileStringImpl(schemaString, defineSchema);
+}
+
+// TODO: document
+function compileFiles(...glob_patterns) {
+    const paths = glob(...glob_patterns),
+          validators = {};
+
+    paths.forEach(schemaPath => compileFile(schemaPath, validators));
+    return validators;
+}
+
+// TODO: document
+function compileStringImpl(schemaString, schemaDefiner) {
     // Create a Javascript evaluation context that contains only core
     // Javascript (e.g. `JSON`, `Object`, `Number`, etc.) and additionally
     // some special identifiers defined here.
-    const context = {etc, or, Any};
+    const context = {etc, or, Any, define: schemaDefiner};
     vm.createContext(context);
 
     const schema = vm.runInContext(schemaString, context);
     return validator(schema);
 }
 
-return {compile};
+// TODO: document
+function compileString(schemaString) {
+    const validators = {},
+    // You gave just a string (not a file), so dependency paths will be
+    // relative to the current working directory.
+          schemaDir = '.';
+    return compileImpl(schemaString, schemaDir, validators);
+}
+
+return {compileString, compileFiles};
 });
