@@ -10,8 +10,9 @@
         // use AMD-style modules
         return define;
     }
-}())(['vm', 'util', 'path', 'child_process'],
-       function (vm, util, path, child_process) {
+}())(['vm', 'util', 'path', 'child_process'], function (vm, util, path, child_process) {
+'use strict';
+
 const etcSymbol = Symbol('tisch.etc'),
       orSymbol = Symbol('tisch.or'),
       str = (...args) => util.inspect(...args);
@@ -405,7 +406,7 @@ function compileStringImpl(schemaString, schemaDefiner, errors) {
 
 // TODO: document
 function compileString(schemaString) {
-    const validators = {}
+    const validators = {},
           errors = [],
     // You gave just a string (not a file), so dependency paths will be
     // relative to the current working directory.
