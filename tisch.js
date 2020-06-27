@@ -320,13 +320,26 @@ function objectValidator(schema, errors) {
     };
 }
 
+// Escape any characters in the specified `text` that could be used for
+// command injection when appearing as a globbable shell command argument.
+// Note that quotes are escaped as well.
+function sanitize(text) {
+    return text.replace(/['";`|&#$(){}]|\s/g, char => '\\' + char);
+}
+
 // Return an array of path strings matching the specified shell glob
-// `patterns`. Note that this implementation of `glob` allows for arbitrary
-// code execution with the privileges of the current process. It's intended to
-// be used with hard-coded patterns.
+// `patterns`.
 function glob(...patterns) {
-    // The `-1` means "one column," which puts each path on its own line.
-    const command = ['ls', '--directory', '-1', ...patterns].join(' '),
+    // `-1` means "one column," which puts each path on its own line.
+    // `--directory` means "don't list a directory's contents, just its name."
+    // The `while` loop is to unquote results that contain spaces, e.g.
+    // if a matching file is called `foo bar`, `ls` will print `'foo bar'`,
+    // but we want `foo bar`.
+    const sanitizedPatterns = patterns.map(sanitize),
+          command = [
+              'ls', '--directory', '-1', ...sanitizedPatterns,
+              '| while read line; do echo $line; done'
+          ].join(' '), 
           options = {encoding: 'utf8'},
           output = child_process.execSync(command, options),
           lines = output.split('\n');
