@@ -60,19 +60,19 @@ function wrappedValidator(impl, errors) {
     // function is invoked. The returned function returns a boolean, but if it
     // returns `false`, the caller can find out why by inspecting `.errors`.
     const validate = function (value) {
-              errors.length = 0;
-              const matched = impl(value);
+        errors.length = 0;
+        const matched = impl(value);
 
-              // If we _did_ match, then there might still be strings in
-              // `errors`, e.g. if we matched the `c` in `or(a, b, c)`, then
-              // `errors` will contain the diagnostics from failing to match
-              // `a` and `b`. In this case, clear `errors`.
-              if (matched) {
-                  errors.length = 0;
-              }
+        // If we _did_ match, then there might still be strings in
+        // `errors`, e.g. if we matched the `c` in `or(a, b, c)`, then
+        // `errors` will contain the diagnostics from failing to match
+        // `a` and `b`. In this case, clear `errors`.
+        if (matched) {
+            errors.length = 0;
+        }
 
-              return matched;
-          };
+        return matched;
+    };
 
     validate.errors = errors;
 
