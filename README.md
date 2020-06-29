@@ -111,6 +111,9 @@ elements match the elements of the pattern, but additionally the array may
 have zero or more trailing elements that match the last pattern before the
 `...etc`.
 
+### `{}`
+Match an empty object literal.
+
 ### `{key: pattern, ...}`
 Match an object having the same length as the pattern, having exactly the same
 keys as the pattern (and no more), and where the value at each key matches the
