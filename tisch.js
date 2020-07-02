@@ -10,7 +10,8 @@
         // use AMD-style modules
         return define;
     }
-}())(['vm', 'util', 'path', 'child_process'], function (vm, util, path, child_process) {
+}())(['vm', 'util', 'path', 'child_process', 'fs'],
+function (vm, util, path, child_process, fs) {
 'use strict';
 
 const etcSymbol = Symbol('tisch.etc'),
