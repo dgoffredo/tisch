@@ -449,6 +449,19 @@ function compileFiles(...glob_patterns) {
     return validators;
 }
 
+// Return a validator function compiles from the file at the specified
+// `schemaPath`. The returned valudator function clears its `.error` array when
+// called (so errors from previous invocations are not preserved).
+function compileOneFile(schemaPath) {
+    const validators = {},
+          errors = [];
+
+    compileFile(schemaPath, validators, errors);
+    const [validate] = validators.values();
+
+    return wrappedValidator(validate, errors);
+}
+
 // This is the core compilation function: all of the other `compile*`
 // functions are wrappers that ultimately call `compileStringImpl`.
 //
@@ -482,5 +495,10 @@ function compileString(schemaString) {
         compileImpl(schemaString, schemaDir, validators, errors), errors);
 }
 
-return {compileString, compileFiles};
+return {
+    compileString,
+    compileFiles,
+    compileFile: compileOneFile
+};
+
 });
