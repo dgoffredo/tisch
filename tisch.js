@@ -457,7 +457,7 @@ function compileOneFile(schemaPath) {
           errors = [];
 
     compileFile(schemaPath, validators, errors);
-    const [validate] = validators.values();
+    const [validate] = Object.values(validators);
 
     return wrappedValidator(validate, errors);
 }
