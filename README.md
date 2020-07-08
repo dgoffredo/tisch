@@ -155,5 +155,29 @@ the specified `function` with the loaded schemas as arguments (corresponding
 to the paths). The function must return a schema (pattern). In this way,
 schemas in separate files can refer to each other by name.
 
+Enforce
+-------
+Each validator function has a method, `.enforce` (I know, a function
+property on a function) that returns its argument if it satisfies the
+schema, or throws an `Error` if it does not satisfy the schema. The
+`Error`'s message contains the `.errors` of the validation function. For
+example,
+```javascript
+define(['tisch.js'], function (tisch) {
+
+const isLlama = tisch.compileFile('llama.tisch.js');
+
+// `fred` is an object that satisfies the schema `llama.tisch.js`, or an
+// `Error` is thrown.
+const fred = isLlama.enforce({
+    name: fred,
+    height: {centimeters: 174},
+    coat: 'tawny',
+    spits: false
+});
+```
+I found myself using the validator functions only to throw if they returned
+false. So, the `.enforce` method simplifies that use case.
+
 [1]: https://json-schema.org
 [2]: https://github.com/amdjs/amdjs-api/blob/master/AMD.md
