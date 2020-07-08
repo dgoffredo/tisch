@@ -339,7 +339,7 @@ function glob(...patterns) {
     const sanitizedPatterns = patterns.map(sanitize),
           command = [
               'ls', '--directory', '-1', ...sanitizedPatterns,
-              '| while read line; do echo $line; done'
+              '| while read line; do echo "$line"; done'
           ].join(' '), 
           options = {encoding: 'utf8'},
           output = child_process.execSync(command, options),
@@ -449,15 +449,15 @@ function compileFiles(...glob_patterns) {
     return validators;
 }
 
-// Return a validator function compiles from the file at the specified
-// `schemaPath`. The returned valudator function clears its `.error` array when
+// Return a validator function compiled from the file at the specified
+// `schemaPath`. The returned validator function clears its `.error` array when
 // called (so errors from previous invocations are not preserved).
 function compileOneFile(schemaPath) {
     const validators = {},
           errors = [];
 
     compileFile(schemaPath, validators, errors);
-    const [validate] = Object.values(validators);
+    const validate = validators[schemaPath];
 
     return wrappedValidator(validate, errors);
 }
