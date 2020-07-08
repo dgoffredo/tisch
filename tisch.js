@@ -56,6 +56,10 @@ function isObject(value) {
 // validators. So, no validators do any clearing, and then the final "root"
 // validator is wrapped with a function that does the clearing, and this is
 // the function that the user sees.
+// Additionally, `wrappedValidator` adds an `enforce` method to the returned
+// function. `enforce` invokes the function with its argument, and if the result
+// is `false`, throws an `Error` containing a formatted diagnostic based on
+// `errors`. If instead the result is `true`, `enforce` returns its argument.
 function wrappedValidator(impl, errors) {
     // `errors` gets cleared (but never reassigned) each time the returned
     // function is invoked. The returned function returns a boolean, but if it
@@ -77,8 +81,13 @@ function wrappedValidator(impl, errors) {
 
     validate.errors = errors;
 
-    // This is a little paranoid. `Object.freeze` will prevent reassignment of
-    // `.errors`.
+    validate.enforce = function (object) {
+        if (!validate(object)) {
+            throw Error(errors.join('\n'));
+        }
+        return object;
+    };
+
     return Object.freeze(validate);
 }
 
