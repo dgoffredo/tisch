@@ -124,6 +124,11 @@ function validatorImpl(schema, errors) {
 }
 
 function getProto(value) {
+    // Corner cases: `null` and `undefined` don't have prototypes.
+    if (value === null || value === undefined) {
+        return undefined;
+    }
+
     return Object.getPrototypeOf(value);
 }
 
