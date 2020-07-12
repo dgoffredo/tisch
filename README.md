@@ -71,6 +71,33 @@ The following patterns are recognized:
 ### `Any`
 Match any value.
 
+`Any` may also be used as a computed property name. In that case, it matches
+any property name. For example, the following schema matches any object with
+exactly one property, where the value at that property is a number:
+```javascript
+({[Any]: Number})
+```
+
+If `Any` is used as a computed property name, then it must be the only
+property in the pattern. For example, the following pattern is invalid:
+```javascript
+({
+    [Any]: Number,
+    extra: [String, ...etc] // error: "extra" is an extraneous key due to `Any`
+})
+```
+
+However, `...etc` may be used to match zero or more occurrences of any
+property whose value matches the corresponding pattern, e.g.
+```javascript
+({
+    [Any]: Number,
+    ...etc
+})
+```
+is a valid pattern, and it matches any object having zero or more properties,
+where the value at each property is a number.
+
 ### e.g. `"some javascript string"`
 Match the string exactly.
 
@@ -137,6 +164,11 @@ pattern that immediately precedes it (the previous element in the array).
 
 At the end of an object literal, `...etc` matches any additional entries in
 the object (i.e. key/value pairs).
+
+At the end of an object literal that contains `Any` as a computed property
+name, `...etc` indicates that a matching object may have zero or more
+entries, but the value in each entry must match the pattern associated with
+the `Any` property.
 
 `etc` may be invoked as a function. If it is _not_ invoked as a function, then
 it matches "zero or more." If it is invoked as a function with one

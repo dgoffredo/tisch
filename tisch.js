@@ -16,6 +16,7 @@ function (vm, util, path, child_process, fs) {
 
 const etcSymbol = Symbol('tisch.etc'),
       orSymbol = Symbol('tisch.or'),
+      anySymbol = Symbol('tisch.any'),
       str = (...args) => util.inspect(...args);
 
 function etc(min, max) {
@@ -42,6 +43,24 @@ function or(...patterns) {
  // Since we decided that an empty `or` matches anything, `Any` can be
  // implemented in terms of `or`.
 const Any = or();
+
+// `Any` can also be used as a computed property name, e.g.
+// 
+//     {
+//         [Any]: {foo: Number, bar: [String, ...etc]}
+//     }
+//
+// matches an object that has any one property, and where the value at that one
+// property is an object containing a property "foo" that's a number... (and so
+// on).
+//
+// If `Any` is used as a computed property name, then it must be the only
+// property. Otherwise I have to solve the n rooks problem, and I have no
+// current need for that anyway, so screw it.
+//
+// To implement this, `Any` has a custom `toString` method that returns a
+// special `Symbol` (a `Symbol`, not a string).
+Any.toString = () => anySymbol;
 
 function isObject(value) {
     // Good enough. Google "javascript check if object is object literal."
@@ -117,8 +136,12 @@ function validatorImpl(schema, errors) {
     // We're dealing with an object. It might be an object pattern, but it
     // also might be an object with an `orSymbol` key, which we have to treat
     // specially.
+    // Another special case is if the objec has an `anySymbol` property.
     if (schema[orSymbol]) {
         return orValidator(schema[orSymbol], errors);
+    }
+    if (schema[anySymbol]) {
+        return wildcardObjectValidator(schema, errors);
     }
     return objectValidator(schema, errors);
 }
@@ -259,10 +282,55 @@ function orValidator(patterns, errors) {
     };
 }
 
+function wildcardObjectValidator(schema, errors) {
+    const pattern = schema[anySymbol],
+          validate = validatorImpl(pattern, errors);
+
+    if (schema.length) {
+        throw Error(`An object pattern with an Any property must have _only_ ` +
+            `that property, but the following has additional ` +
+            `properties ${str(Object.keys(schema))}: ${str(schema)}`);
+    }
+
+    return function (object) {
+        const length = Object.keys(object).length;
+
+        if (length === 0) {
+            errors.push(`Object does not match the pattern ${str(schema)} ` +
+                `because the object does not have any properties: ` +
+                str(object));
+            return false;
+        }
+
+        if (length !== 1 && !(etcSymbol in schema)) {
+            errors.push(`Object does not match the pattern ${str(schema)} ` +
+                `because the object has more than one property: ` +
+                str(object));
+            return false;
+        }
+
+        const {min=0, max=Infinity} = schema[etcSymbol];
+        if (length < min || length > max) {
+            errors.push(`Object does not match the pattern ${str(schema)} ` +
+                `because the object has ${length} properties while between ` +
+                `${min} and ${max} are required.`);
+            return false;
+        }
+
+        if (!Object.values(object).every(validate)) {
+            errors.push(`...occurred in wildcard object pattern ${str(schema)}`);
+            return false;
+        }
+
+        return true;
+    };
+}
+
 function objectValidator(schema, errors) {
     // An object validator has zero or more required keys, optional keys, and
     // possibly accepts some amount of additional keys depending on whether
     // there's an `...etc`.
+    // An optional key is a string that ends with a question mark ("?").
 
     // `min` and `max` as in "minimum and maximum number of allowed keys aside
     // from those that are required or optional."
