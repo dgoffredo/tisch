@@ -295,17 +295,10 @@ function wildcardObjectValidator(schema, errors) {
     return function (object) {
         const length = Object.keys(object).length;
 
-        if (length === 0) {
-            errors.push(`Object does not match the pattern ${str(schema)} ` +
-                `because the object does not have any properties: ` +
-                str(object));
-            return false;
-        }
-
         if (length !== 1 && !(etcSymbol in schema)) {
             errors.push(`Object does not match the pattern ${str(schema)} ` +
-                `because the object has more than one property: ` +
-                str(object));
+                `because the object has ${length} properties instead of ` +
+                `exactly one: ${str(object)}`);
             return false;
         }
 
