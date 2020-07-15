@@ -546,10 +546,13 @@ function compileOneFile(schemaPath) {
 // depend upon schemas in other files. The specified array of `errors` will be
 // bound within the returned validator.
 function compileStringImpl(schemaString, schemaDefiner, errors) {
-    // Create a Javascript evaluation context that contains only core
-    // Javascript (e.g. `JSON`, `Object`, `Number`, etc.) and additionally
-    // some special identifiers defined here.
-    const context = {etc, or, Any, define: schemaDefiner};
+    const context = {
+        // Use the _same_ builtin globals so we can compare value prototypes.
+        Number, Boolean, Object, String, Array,
+        // Tisch-specific globals.
+        etc, or, Any,
+        define: schemaDefiner
+    };
     vm.createContext(context);
 
     const schema = vm.runInContext(schemaString, context);
