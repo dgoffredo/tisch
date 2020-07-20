@@ -445,15 +445,16 @@ function compileFile(schemaPath, validators, errors) {
     return validators[schemaPath] = validator;
 }
 
-// Return a validator function compiled from the specified `schemaString`,
-// using the specified `schemaDir` as the effective working directory (for
-// finding dependent schema files). The specified array of `errors` will be
-// bound inside of the validator. Since validators can depend on each other,
+// Return a validator function compiled from the specified `schema`, where
+// `schema` is either a string to be parsed an executed, or a function to be
+// executed. Use the specified `schemaDir` as the effective working directory
+// (for finding dependent schema files). The specified array of `errors` will
+// be bound inside of the validator. Since validators can depend on each other,
 // use the specified `validators` (`{<path>: <validator>}`) to look up or
 // populate dependent validators. Note that the returned validator function
 // does not clear `errors`. For that it must be wrapped (see
 // `wrappedValidator`).
-function compileImpl(schemaString, schemaDir, validators, errors) {
+function compileImpl(schema, schemaDir, validators, errors) {
     // Here we define a function that is the `define` equivalent for tisch
     // schemas. It allows a schema to say, "I depend on these other schemas,
     // and please bind them to the arguments of this function, which will
@@ -498,7 +499,12 @@ function compileImpl(schemaString, schemaDir, validators, errors) {
         return init(...dep_schemas);
     }
 
-    return compileStringImpl(schemaString, defineSchema, errors);
+    if (typeof schema === 'string') {
+        return compileStringImpl(schema, defineSchema, errors);
+    }
+    else {
+        return compileFunctionImpl(schema, defineSchema, errors);
+    }
 }
 
 // Return an object `{<path>: <validator>}` of validator functions compiled
@@ -559,24 +565,40 @@ function compileStringImpl(schemaString, schemaDefiner, errors) {
     return validatorImpl(schema, errors);
 }
 
-// Return a validator function compiled from the specified `schemaString`. The
-// `.error` property of the returned validator function will be cleared at the
-// beginning of each invocation (so errors from previous invocations are not
-// preserved).
-function compileString(schemaString) {
+// This is like `compileStringImpl`, except instead of evaluating a string of
+// tisch, we execute a function of tisch.
+function compileFunctionImpl(func, schemaDefiner, errors) {
+    const context = {
+        // Tisch-specific globals. The builtin globals are already accessible
+        // to `func`.
+        etc, or, Any,
+        define: schemaDefiner
+    };
+
+    const schema = func(context);
+    return validatorImpl(schema, errors);
+}
+
+// Return a validator function compiled from the specified `schema`, where
+// `schema` is either a string to be parsed and evaluated or a function to be
+// executed. The `.error` property of the returned validator function will be
+// cleared at the beginning of each invocation (so errors from previous
+// invocations are not preserved).
+function compile(schema) {
     const validators = {},
           errors = [],
-    // You gave just a string (not a file), so dependency paths will be
-    // relative to the current working directory.
+          // You gave just a string or a function (not a file), so dependency
+          // paths will be relative to the current working directory.
           schemaDir = '.';
     return wrappedValidator(
-        compileImpl(schemaString, schemaDir, validators, errors), errors);
+        compileImpl(schema, schemaDir, validators, errors), errors);
 }
 
 return {
-    compileString,
+    compileString: compile,
     compileFiles,
-    compileFile: compileOneFile
+    compileFile: compileOneFile,
+    compileFunction: compile
 };
 
 });
