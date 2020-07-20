@@ -302,7 +302,7 @@ function wildcardObjectValidator(schema, errors) {
             return false;
         }
 
-        const {min=0, max=Infinity} = schema[etcSymbol];
+        const {min=0, max=Infinity} = schema[etcSymbol] || {min: 1, max: 1};
         if (length < min || length > max) {
             errors.push(`Object does not match the pattern ${str(schema)} ` +
                 `because the object has ${length} properties while between ` +
