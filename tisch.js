@@ -17,6 +17,8 @@ function (vm, util, path, child_process, fs) {
 const etcSymbol = Symbol('tisch.etc'),
       orSymbol = Symbol('tisch.or'),
       anySymbol = Symbol('tisch.any'),
+      placeholderSymbol = Symbol('tisch.placeholder'),
+      recursiveSchemas = new WeakMap(), // schema -> undefined | function
       str = (...args) => util.inspect(...args);
 
 function etc(min, max) {
@@ -28,6 +30,50 @@ function etc(min, max) {
     };
 
     return self;
+}
+
+// `recursive` uses placeholder objects (objects with a `placeholderSymbol`
+// property) provided by a `Proxy`. The placeholders are then filled with the
+// compiled schemas during compilation.
+function recursive(schemaProducer) {
+    // property access handler for the proxy
+    const placeholders = {};
+    const handler = {
+        set: function () {
+            throw Error('Do not assign properties to the argument provided by "recursive".');
+        },
+        get: function (target, property) {
+            // `target` is another name for `placeholders` (that's just how
+            // proxies work).
+
+            // `true` is used as a dummy (placeholder...) value. It will
+            // be replaced with a schema after we call `schemaProducer`.
+            return target[property] = {[placeholderSymbol]: true}
+        }
+    };
+    const proxy = new Proxy(placeholders, handler);
+    
+    const schemas = schemaProducer(proxy);
+
+    // If there was only one placeholder produced, then treat `schemas` as a
+    // single schema value. Otherwise, treat `schemas` as an object of
+    // `{<name>: <schema>}`.
+    if (Object.keys(placeholders).length === 1) {
+        const [placeholder] = Object.values(placeholders);
+        const schema = schemas;
+        // We'll look at `recursiveSchemas` during compilation. See
+        // `validatorImpl`.
+        recursiveSchemas.set(schema, placeholder);
+    }
+    else {
+        Object.entries(schemas).forEach(([name, schema]) => {
+            // We'll look at `recursiveSchemas` during compilation. See
+            // `validatorImpl`.
+            recursiveSchemas.set(schema, placeholders[name]);
+        });
+    }
+
+    return schemas;
 }
 
 // Make `...etc` work like `...etc()`.
@@ -111,6 +157,16 @@ function wrappedValidator(impl, errors) {
 }
 
 function validatorImpl(schema, errors) {
+    // If this is a recursive schema, then after compiling it we need to
+    // update references to it with the compiled version.
+    if (recursiveSchemas.has(schema)) {
+        const placeholder = recursiveSchemas.get(schema);
+        recursiveSchemas.delete(schema);
+        const validator = validatorImpl(schema, errors);
+        placeholder[placeholderSymbol] = validator;
+        return validator;
+    }
+
     if (typeof schema === 'function' &&
         ['Number', 'Boolean', 'Object', 'Array', 'String'].includes(schema.name)) {
         return typeValidator(schema, errors);
@@ -134,16 +190,25 @@ function validatorImpl(schema, errors) {
         throw Error(`Invalid schema subpattern: ${str(schema)}`);
     }
     // We're dealing with an object. It might be an object pattern, but it
-    // also might be an object with an `orSymbol` key, which we have to treat
-    // specially.
-    // Another special case is if the objec has an `anySymbol` property.
+    // also might be an object with a special case `Symbol` key that requires
+    // special treatment.
     if (schema[orSymbol]) {
         return orValidator(schema[orSymbol], errors);
     }
     if (schema[anySymbol]) {
         return wildcardObjectValidator(schema, errors);
     }
+    if (schema[placeholderSymbol]) {
+        return placeholderValidator(schema);
+    }
     return objectValidator(schema, errors);
+}
+
+function placeholderValidator(schema) {
+    return function (value) {
+        const actualValidator = schema[placeholderSymbol];
+        return actualValidator(value);
+    };
 }
 
 function getProto(value) {
@@ -556,7 +621,7 @@ function compileStringImpl(schemaString, schemaDefiner, errors) {
         // Use the _same_ builtin globals so we can compare value prototypes.
         Number, Boolean, Object, String, Array,
         // Tisch-specific globals.
-        etc, or, Any,
+        etc, or, Any, recursive,
         define: schemaDefiner
     };
     vm.createContext(context);
@@ -571,7 +636,7 @@ function compileFunctionImpl(func, schemaDefiner, errors) {
     const context = {
         // Tisch-specific globals. The builtin globals are already accessible
         // to `func`.
-        etc, or, Any,
+        etc, or, Any, recursive,
         define: schemaDefiner
     };
 

@@ -187,6 +187,37 @@ the specified `function` with the loaded schemas as arguments (corresponding
 to the paths). The function must return a schema (pattern). In this way,
 schemas in separate files can refer to each other by name.
 
+### `recursive(function (self) { ... })`
+`recursive` is a special function in tisch schemas. It accepts a function
+of one argument that returns an object. The function is expected to
+destructure its argument into an object having one or more properties. The
+property values, whatever their keys, will be bound to identifiers that the
+function can use as if they are schemas. If only one such identifier was
+bound, then the function then must return a schema for that binding. If
+multiple identifiers were bound, then the function must return an object
+having the same structure as the argument object, but whose values are
+schema objects. `recursive` then returns that object.
+
+For example,
+```javascript
+recursive(({expression}) => or(
+        Number,
+        {'+': [expression, ...etc]}))
+```
+is a schema that matches a number or a tree of `+` objects that contain
+arrays of numbers or `+` objects.
+
+Mutual recursion is possible by destructuring the argument into multiple
+variables. For example,
+```javascript
+const {yin, yang} = recursive(({yin, yang}) => ({
+    yin: [String, Number, yang, ...etc],
+    yang: {'contrived': or(yin, String)}
+}));
+```
+defines two schemas, `yin` and `yang`, whose definitions are mutually
+recursive.
+
 Enforce
 -------
 Each validator function has a method, `.enforce` (I know, a function
