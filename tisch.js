@@ -38,13 +38,24 @@ function etc(min, max) {
 function recursive(schemaProducer) {
     // property access handler for the proxy
     const placeholders = {};
+    // `proxyPassthrough` determines whether the `proxy`, below, actually does
+    // its job of minting placeholder objects, or if it's "disabled" and
+    // should instead pass through property access to its target object,
+    // `placeholder`. `proxyPassthrough` is used for the case where
+    // `schemaProducer` didn't access any properties on the proxy. In that
+    // case, we want the proxy itself to act as a placeholder; to prevent
+    // subsequent compilation from breaking, we have to disable the proxy so
+    // that it behaves like a normal object.
+    let proxyPassthrough = false;
     const handler = {
-        set: function () {
-            throw Error('Do not assign properties to the argument provided by "recursive".');
-        },
         get: function (target, property) {
             // `target` is another name for `placeholders` (that's just how
             // proxies work).
+
+            if (proxyPassthrough) {
+                // See the definition of `proxyPassthrough` for an explanation.
+                return target[property];
+            }
 
             // `true` is used as a dummy (placeholder...) value. It will
             // be replaced with a schema after we call `schemaProducer`.
@@ -55,16 +66,22 @@ function recursive(schemaProducer) {
     
     const schemas = schemaProducer(proxy);
 
-    // If there was only one placeholder produced, then treat `schemas` as a
-    // single schema value. Otherwise, treat `schemas` as an object of
-    // `{<name>: <schema>}`.
-    if (Object.keys(placeholders).length === 1) {
-        const [placeholder] = Object.values(placeholders);
+    // If there were not any placeholders produced, then treat `schemas` as a
+    // single schema value, and use the `proxy` object itself as the
+    // placeholder (since that's what `schemaProducer` was given). This covers
+    // the common case where you're recursing on one schema only (non-mutual
+    // recursion), and so just use the function argument without destructuring
+    // it.
+    if (Object.keys(placeholders).length === 0) {
         const schema = schemas;
+        const placeholder = proxy;
+        proxyPassthrough = true;
+        placeholder[placeholderSymbol] = true;
         // We'll look at `recursiveSchemas` during compilation. See
         // `validatorImpl`.
         recursiveSchemas.set(schema, placeholder);
     }
+    // Otherwise, treat `schemas` as an object of `{<name>: <schema>}`.
     else {
         Object.entries(schemas).forEach(([name, schema]) => {
             // We'll look at `recursiveSchemas` during compilation. See

@@ -188,19 +188,19 @@ to the paths). The function must return a schema (pattern). In this way,
 schemas in separate files can refer to each other by name.
 
 ### `recursive(function (self) { ... })`
-`recursive` is a special function in tisch schemas. It accepts a function
-of one argument that returns an object. The function is expected to
-destructure its argument into an object having one or more properties. The
-property values, whatever their keys, will be bound to identifiers that the
-function can use as if they are schemas. If only one such identifier was
-bound, then the function then must return a schema for that binding. If
-multiple identifiers were bound, then the function must return an object
-having the same structure as the argument object, but whose values are
-schema objects. `recursive` then returns that object.
+`recursive` is a special function in tisch schemas. It allows part of a schema's definition to reference itself. `recursive`'s single argument is a function, `func`, of one argument, `self`. There are two cases:
+1. If no property is ever accessed on `self`, then `self` refers to value
+   returned by `func`. Thus by returning a schema that involves `self`,
+   `func` can define a recursive schema.
+2. If properties are accessed on `self`, then each property value refers to
+   a separate schema placeholder. `func` must then return an object mapping
+   those property names to schema objects. Thus the values of the object
+   returned by `func` are schemas defined in terms of themselves and of
+   each other.
 
 For example,
 ```javascript
-recursive(({expression}) => or(
+recursive(expression => or(
         Number,
         {'+': [expression, ...etc]}))
 ```
