@@ -350,15 +350,29 @@ function dynamicArrayValidator(fixed, repeatable, {min=0, max=Infinity}, errors)
     };
 }
 
+// Remove the specified count `n` elements from the end of the specified
+// `array`. Return an array containing the elements removed. Note that `array`
+// is modified in-place.
+function popN(array, n) {
+    return array.splice(-n, n);
+}
+
 function orValidator(patterns, errors) {
     const validators = patterns.map(pattern => validatorImpl(pattern, errors))
     if (validators.length === 0) {
         return () => true;
     }
     return function (value) {
-        const matched = validators.some(validate => validate(value));
+        // Find the first validator that passes.
+        const numFailed = validators.findIndex(validate => validate(value));
+        const matched = numFailed !== -1;
         if (!matched) {
             errors.push(`The value ${str(value)} did not match any of the "or" patterns: ${str(patterns)}`);
+        }
+        else {
+            // We _did_ find one that succeeded. The ones before it (that
+            // failed) logged errors. Remove those errors.
+            popN(errors, numFailed);
         }
         return matched;
     };
