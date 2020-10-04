@@ -19,7 +19,7 @@ const etcSymbol = Symbol('tisch.etc'),
       anySymbol = Symbol('tisch.any'),
       placeholderSymbol = Symbol('tisch.placeholder'),
       recursiveSchemas = new Map(), // schema -> undefined | function
-      str = (...args) => util.inspect(...args);
+      str = obj => util.inspect(obj, {depth: null});
 
 function etc(min, max) {
     let self = {
