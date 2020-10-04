@@ -18,7 +18,7 @@ const etcSymbol = Symbol('tisch.etc'),
       orSymbol = Symbol('tisch.or'),
       anySymbol = Symbol('tisch.any'),
       placeholderSymbol = Symbol('tisch.placeholder'),
-      recursiveSchemas = new WeakMap(), // schema -> undefined | function
+      recursiveSchemas = new Map(), // schema -> undefined | function
       str = (...args) => util.inspect(...args);
 
 function etc(min, max) {
@@ -57,9 +57,14 @@ function recursive(schemaProducer) {
                 return target[property];
             }
 
-            // `true` is used as a dummy (placeholder...) value. It will
-            // be replaced with a schema after we call `schemaProducer`.
-            return target[property] = {[placeholderSymbol]: true}
+            if (property in target) {
+                return target[property];
+            }
+            else {
+                // `property` is used as a dummy (placeholder...) value. It will be
+                // replaced with a schema after we call `schemaProducer`.
+                return target[property] = {[placeholderSymbol]: property}
+            }
         }
     };
     const proxy = new Proxy(placeholders, handler);
@@ -76,6 +81,7 @@ function recursive(schemaProducer) {
         const schema = schemas;
         const placeholder = proxy;
         proxyPassthrough = true;
+        // `true` is used as a dummy value until we have the compiled validator.
         placeholder[placeholderSymbol] = true;
         // We'll look at `recursiveSchemas` during compilation. See
         // `validatorImpl`.
@@ -91,6 +97,24 @@ function recursive(schemaProducer) {
     }
 
     return schemas;
+}
+
+// It is possible to have mutually recursive schemas, where one part of the mutual recursion is
+// not visible directly from the returned schema. In these cases, we must make sure that we've
+// compiled all recursive components and updated their placeholders.
+// TODO: I added this as a hack to fix a bug due to a design oversight. Another
+// design might be simpler.
+function finishRecursiveSchemas(errors) {
+    if (recursiveSchemas.size === 0) {
+        return;
+    }
+
+    const schema = recursiveSchemas.keys().next();
+    // `validatorImpl` has the side effect of updating placeholders to contain
+    // the resulting validator, so we don't need to do anything with the return
+    // value here.
+    validatorImpl(schema, errors);
+    finishRecursiveSchemas(errors);
 }
 
 // Make `...etc` work like `...etc()`.
@@ -595,12 +619,21 @@ function compileImpl(schema, schemaDir, validators, errors) {
         return init(...dep_schemas);
     }
 
+    // the return value
+    let validator;
+
     if (typeof schema === 'string') {
-        return compileStringImpl(schema, defineSchema, errors);
+        validator = compileStringImpl(schema, defineSchema, errors);
     }
     else {
-        return compileFunctionImpl(schema, defineSchema, errors);
+        validator = compileFunctionImpl(schema, defineSchema, errors);
     }
+
+    // See the definition of `finishRecursiveSchemas` for an explanation of why
+    // this is necessary.
+    finishRecursiveSchemas(errors);
+
+    return validator;
 }
 
 // Return an object `{<path>: <validator>}` of validator functions compiled
