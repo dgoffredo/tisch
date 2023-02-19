@@ -32,6 +32,12 @@ function etc(min, max) {
     return self;
 }
 
+function isEtc(pattern) {
+    // We could just use `pattern[etcSymbol]`, but that breaks with `null`.
+    // Hence this function.
+    return ['object', 'function'].indexOf(typeof pattern) !== -1 && pattern !== null && pattern[etcSymbol];
+}
+
 // `recursive` uses placeholder objects (objects with a `placeholderSymbol`
 // property) provided by a `Proxy`. The placeholders are then filled with the
 // compiled schemas during compilation.
@@ -226,7 +232,18 @@ function validatorImpl(schema, errors) {
     if (Array.isArray(schema)) {
         return arrayValidator(schema, errors);
     }
-    
+
+    if (schema instanceof Map) {
+        // A Map schema is translated into a validator that converts a
+        // specified Map argument into an array of name/value pairs,
+        // i.e. Map(x -> y, z -> w) -> [[x, y], [z, w]]
+        // and validates the transformed value against a corresponding
+        // array validator deduced from the Map schema.
+        // TODO: Maybe a hack, maybe saves lines of code.
+        // TODO: It'll also produce confusing error messages.
+        return mapValidator(schema, errors);
+    }
+
     if (!isObject(schema)) {
         throw Error(`Invalid schema subpattern: ${str(schema)}`);
     }
@@ -243,6 +260,29 @@ function validatorImpl(schema, errors) {
         return placeholderValidator(schema);
     }
     return objectValidator(schema, errors);
+}
+
+function mapValidator(schema, errors) {
+    const arraySchema = Array.from(schema.entries()).map(([key, value]) => {
+        if (isEtc(key)) {
+            return key;
+        }
+        return [key, value];
+    });
+
+    // TODO: This will screw up recursion.
+    const arrayifiedValidator = arrayValidator(arraySchema, errors);
+
+    return function (value) {
+        // If it's not a Map, then false.
+        // If it is a Map, then convert it into an Array and validate it
+        // against the transformed validator.
+        if (!(value instanceof Map)) {
+            errors.push(`It's not a Map: ${value}`);
+            return false;
+        }
+        return arrayifiedValidator(Array.from(value.entries()), errors);
+    };
 }
 
 function placeholderValidator(schema) {
@@ -286,12 +326,6 @@ function literalValidator(expected, errors) {
 
 function integerValidator(value) {
     return typeof value === 'bigint' || Number.isInteger(value);
-}
-
-function isEtc(pattern) {
-    // We could just use `pattern[etcSymbol]`, but that breaks with `null`.
-    // Hence this function.
-    return pattern !== null && pattern[etcSymbol];
 }
 
 function checkIsArray(value, errors) {
@@ -681,6 +715,19 @@ function compileOneFile(schemaPath) {
     return wrappedValidator(validate, errors);
 }
 
+function map(...entries) {
+    const result = new Map();
+    entries.forEach(entry => {
+        if (isEtc(entry)) {
+            result.set(entry);
+        } else {
+            const [key, value] = entry;
+            result.set(key, value);
+        }
+    });
+    return result;
+}
+
 // This is the core compilation function: all of the other `compile*`
 // functions are wrappers that ultimately call `compileStringImpl`.
 //
@@ -696,6 +743,7 @@ function compileStringImpl(schemaString, schemaDefiner, errors) {
         // Tisch-specific globals.
         etc, or, Any, recursive,
         Integer: integerValidator,
+        map,
         define: schemaDefiner
     };
     vm.createContext(context);
@@ -712,6 +760,7 @@ function compileFunctionImpl(func, schemaDefiner, errors) {
         // to `func`.
         etc, or, Any, recursive,
         Integer: integerValidator,
+        map,
         define: schemaDefiner
     };
 
