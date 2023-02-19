@@ -270,7 +270,6 @@ function mapValidator(schema, errors) {
         return [key, value];
     });
 
-    // TODO: This will screw up recursion.
     const arrayifiedValidator = arrayValidator(arraySchema, errors);
 
     return function (value) {
