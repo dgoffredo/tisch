@@ -284,6 +284,10 @@ function literalValidator(expected, errors) {
     };
 }
 
+function integerValidator(value) {
+    return typeof value === 'bigint' || Number.isInteger(value);
+}
+
 function isEtc(pattern) {
     // We could just use `pattern[etcSymbol]`, but that breaks with `null`.
     // Hence this function.
@@ -381,6 +385,7 @@ function popN(array, n) {
     return array.splice(-n, n);
 }
 
+// or(patterns...) -> {[orSymbol]: patterns}
 function orValidator(patterns, errors) {
     const validators = patterns.map(pattern => validatorImpl(pattern, errors))
     if (validators.length === 0) {
@@ -402,6 +407,8 @@ function orValidator(patterns, errors) {
     };
 }
 
+// {[Any]: schema}
+// {[Any]: schema, ...etc}
 function wildcardObjectValidator(schema, errors) {
     const pattern = schema[anySymbol],
           validate = validatorImpl(pattern, errors);
@@ -439,6 +446,8 @@ function wildcardObjectValidator(schema, errors) {
     };
 }
 
+// {foo: schema1, bar: schema2}
+// {foo: schema1, bar: schema2, ...etc}
 function objectValidator(schema, errors) {
     // An object validator has zero or more required keys, optional keys, and
     // possibly accepts some amount of additional keys depending on whether
@@ -686,6 +695,7 @@ function compileStringImpl(schemaString, schemaDefiner, errors) {
         Number, Boolean, Object, String, Array,
         // Tisch-specific globals.
         etc, or, Any, recursive,
+        Integer: integerValidator,
         define: schemaDefiner
     };
     vm.createContext(context);
@@ -701,6 +711,7 @@ function compileFunctionImpl(func, schemaDefiner, errors) {
         // Tisch-specific globals. The builtin globals are already accessible
         // to `func`.
         etc, or, Any, recursive,
+        Integer: integerValidator,
         define: schemaDefiner
     };
 
