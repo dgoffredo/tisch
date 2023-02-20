@@ -214,6 +214,10 @@ function validatorImpl(schema, errors) {
         return validator;
     }
 
+    if (typeof schema === 'function' && schema.name === 'Buffer') {
+        return stupidTypeValidator(schema, errors);
+    }
+
     if (typeof schema === 'function' &&
         ['Number', 'Boolean', 'Object', 'Array', 'String'].includes(schema.name)) {
         return typeValidator(schema, errors);
@@ -324,6 +328,18 @@ function getProto(value) {
     }
 
     return Object.getPrototypeOf(value);
+}
+
+function stupidTypeValidator(type, errors) {
+    // `type` is a factory function, like `Buffer`, whose values are instances
+    // of the type, so we can just use `instanceof`.
+    return function (value) {
+        if (value instanceof type) {
+            return true;
+        }
+        errors.push(`expected value of type ${type.name} but got value of type ${typeof value}: ${str(value)}`);
+        return false;
+    };
 }
 
 function typeValidator(type, errors) {
