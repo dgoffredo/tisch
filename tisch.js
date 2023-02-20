@@ -74,7 +74,7 @@ function recursive(schemaProducer) {
         }
     };
     const proxy = new Proxy(placeholders, handler);
-    
+
     const schemas = schemaProducer(proxy);
 
     // If there were not any placeholders produced, then treat `schemas` as a
@@ -138,7 +138,7 @@ function or(...patterns) {
 const Any = or();
 
 // `Any` can also be used as a computed property name, e.g.
-// 
+//
 //     {
 //         [Any]: {foo: Number, bar: [String, ...etc]}
 //     }
@@ -534,7 +534,7 @@ function objectValidator(schema, errors) {
     const {min=0, max=Infinity} = schema[etcSymbol] || {min: 0, max: 0},
           required = {}, // {key: validator}
           optional = {}; // {key: validator}
-    
+
     // Fill in `required` and `optional`.
     Object.entries(schema).forEach(([key, pattern]) => {
         if (key.endsWith('?')) {
@@ -546,6 +546,10 @@ function objectValidator(schema, errors) {
     });
 
     return function (object) {
+        if (object instanceof Map) {
+            object = Object.fromEntries(object.entries());
+        }
+
         if (!isObject(object)) {
             errors.push(`expected an object literal for pattern ${str(schema)}, but received a ${typeof object}: ${str(object)}`);
             return false;
@@ -619,7 +623,7 @@ function glob(...patterns) {
           command = [
               'ls', '--directory', '-1', ...sanitizedPatterns,
               '| while read line; do echo "$line"; done'
-          ].join(' '), 
+          ].join(' '),
           options = {encoding: 'utf8'},
           output = child_process.execSync(command, options),
           lines = output.split('\n');
@@ -687,7 +691,7 @@ function compileImpl(schema, schemaDir, validators, errors) {
     //                    {site: 'TURKEY_LAKE', year: 2001,
     //                     badges_received: ['WOODWORKING']}]
     //     }
-    //     
+    //
     // Dependencies are paths to tisch schema files, relative to the directory
     // of the current file (i.e. the file with the `define` call).
 
