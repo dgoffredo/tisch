@@ -255,7 +255,7 @@ function validatorImpl(schema, errors) {
         schema = Object.fromEntries(Array.from(schema.entries()).map(([key, value]) => {
             // `etc` is weird in maps.
             // TODO: Can this be fixed elsewhere?
-            if (isObject(key) && key[etcSymbol]) {
+            if (isEtc(key)) {
                 return [etcSymbol, key[etcSymbol]];
             }
             return [key, value];
@@ -744,6 +744,11 @@ function map(...entries) {
     const result = new Map();
     entries.forEach(entry => {
         if (isEtc(entry)) {
+            // TODO: There might be a better way.
+            // Instead of  `{[etcSymbol]: ...} -> undefined`, we could have
+            // `etcSymbol -> ...`.
+            // But I tried it and ran into issues with `etcSymbol` being a key
+            // in some other context. Worth revisiting.
             result.set(entry);
         } else {
             const [key, value] = entry;
