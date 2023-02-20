@@ -241,7 +241,25 @@ function validatorImpl(schema, errors) {
         // array validator deduced from the Map schema.
         // TODO: Maybe a hack, maybe saves lines of code.
         // TODO: It'll also produce confusing error messages.
-        return mapValidator(schema, errors);
+        //
+        // However, if the map has any optional keys, i.e. string-valued keys
+        // ending in "?", then transform the map into an object and pass it
+        // along to the object validator functions.
+        // TODO: Definitely a hack, but I'm an honest man with simple tastes
+        // and schema validation is one of them.
+        //
+        if (!Array.from(schema.keys()).some(key => typeof key === 'string' && key.endsWith('?'))) {
+            return mapValidator(schema, errors);
+        }
+
+        schema = Object.fromEntries(Array.from(schema.entries()).map(([key, value]) => {
+            // `etc` is weird in maps.
+            // TODO: Can this be fixed elsewhere?
+            if (isObject(key) && key[etcSymbol]) {
+                return [etcSymbol, key[etcSymbol]];
+            }
+            return [key, value];
+        }));
     }
 
     if (!isObject(schema)) {
@@ -262,6 +280,8 @@ function validatorImpl(schema, errors) {
     return objectValidator(schema, errors);
 }
 
+// TODO: Transforming to an array was a mistake.
+// I thought that order dependence was ok, but it breaks optional elements.
 function mapValidator(schema, errors) {
     const arraySchema = Array.from(schema.entries()).map(([key, value]) => {
         if (isEtc(key)) {
@@ -273,9 +293,15 @@ function mapValidator(schema, errors) {
     const arrayifiedValidator = arrayValidator(arraySchema, errors);
 
     return function (value) {
-        // If it's not a Map, then false.
-        // If it is a Map, then convert it into an Array and validate it
-        // against the transformed validator.
+        // If it's not a Map, then see if it's a plain object. If it's a plain
+        // object, tolerate that. Otherwise, false.
+        //
+        // On the other hand, if it is a Map, then convert it into an Array and
+        // validate it against the transformed validator.
+        if (isObject(value)) {
+            value = new Map(Object.entries(value));
+        }
+
         if (!(value instanceof Map)) {
             errors.push(`It's not a Map: ${value}`);
             return false;
